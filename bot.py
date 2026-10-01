@@ -28,7 +28,7 @@ from telegram.ext import (
 
 # ============ 🔑 CONFIG ============
 BOT_TOKEN = "8833851494:AAGCqVhxe-Dbzq4ViB8_I1kIdLKrEA7UpdI"
-WEBAPP_URL = "https://mhvjuho-lab.github.io/VIP_VIRAL_VIDEOS.html/
+WEBAPP_URL = "https://mhvjuho-lab.github.io/VIP_VIRAL_VIDEOS.html/"
 BOT_USERNAME = "VIP_VIRAL_VIDE0S_BOT"
 
 # ✅ Render এর জন্য PORT handling
