@@ -1620,15 +1620,7 @@ function initApp() {
 
     onValue(ref(db, 'settings/adNetworks'), s => {
         networkConfig = s.val() || {};
-        if (typeof BengalAds !== 'undefined') {
-            try {
-                BengalAds.init({
-                    appId: networkConfig.bengalads?.appId || "tma_98271f9d85ac527b81a712b889a7b5576f2c3f08",
-                    formatId: networkConfig.bengalads?.adId || "int_ed2771990e1cca356683e1c098d94a0f68b9696c",
-                    telegramInitData: window.Telegram?.WebApp?.initData || ""
-                });
-            } catch(e) {}
-        }
+        initBengalAds();
         if (networkConfig.onclicka?.adId) initOnClickA(networkConfig.onclicka.adId);
         if (window.Taddy && typeof window.Taddy.ready === 'function') {
             try { window.Taddy.ready(); } catch(e) {}
@@ -2062,29 +2054,46 @@ function fallbackCopy(text) {
 }
 
 /* ============ AD SYSTEMS ============ */
-function initBengalAds() {
+const BENGAL_APP_ID_DEFAULT = "tma_98271f9d85ac527b81a712b889a7b5576f2c3f08";
+const BENGAL_FORMAT_ID_DEFAULT = "int_ed2771990e1cca356683e1c098d94a0f68b9696c";
+let _bengalInitKey = "";
+function bengalFormatOk(id) { return typeof id === 'string' && id.indexOf('int_') === 0; }
+function initBengalAds(formatId) {
     try {
-        if (typeof BengalAds !== 'undefined') {
-            BengalAds.init({
-                appId: networkConfig?.bengalads?.appId || "tma_98271f9d85ac527b81a712b889a7b5576f2c3f08",
-                formatId: networkConfig?.bengalads?.adId || "int_ed2771990e1cca356683e1c098d94a0f68b9696c",
-                telegramInitData: window.Telegram?.WebApp?.initData || ""
-            });
-        }
-    } catch(e) {}
+        if (typeof BengalAds === 'undefined') return false;
+        try { window.Telegram?.WebApp?.ready(); } catch(e) {}
+        const appId = networkConfig?.bengalads?.appId || BENGAL_APP_ID_DEFAULT;
+        const cfgFmt = networkConfig?.bengalads?.adId;
+        const fmt = [formatId, cfgFmt].find(bengalFormatOk) || BENGAL_FORMAT_ID_DEFAULT;
+        const initData = window.Telegram?.WebApp?.initData || "";
+        const key = appId + '|' + fmt + '|' + initData;
+        if (key === _bengalInitKey) return true;
+        BengalAds.init({ appId: appId, formatId: fmt, telegramInitData: initData });
+        _bengalInitKey = key;
+        return true;
+    } catch(e) { console.warn('BengalAds init', e); return false; }
+}
+function waitForBengalAds(timeout = 5000) {
+    return new Promise((res, rej) => {
+        const t0 = Date.now();
+        (function chk() {
+            if (typeof BengalAds !== 'undefined') return res();
+            if (Date.now() - t0 > timeout) return rej("BengalAds SDK missing");
+            setTimeout(chk, 150);
+        })();
+    });
 }
 function playBengalAdsAd(formatId) {
-    return new Promise((res, rej) => {
-        if (typeof BengalAds === 'undefined') return rej("BengalAds SDK missing");
+    return new Promise(async (res, rej) => {
         try {
-            if (formatId) {
-                BengalAds.init({
-                    appId: networkConfig?.bengalads?.appId || "tma_98271f9d85ac527b81a712b889a7b5576f2c3f08",
-                    formatId: String(formatId),
-                    telegramInitData: window.Telegram?.WebApp?.initData || ""
-                });
+            await waitForBengalAds();
+            if (!initBengalAds(formatId)) return rej("BengalAds init failed");
+            const result = await BengalAds.showInterstitial();
+            const st = result && result.status;
+            if (result && (result.error || (st && st !== 'closed' && /err|fail|fill|unavail|not|block|empty/i.test(String(st))))) {
+                return rej("BengalAds: " + (st || result.error));
             }
-            BengalAds.showInterstitial().then(() => res()).catch(rej);
+            res();
         } catch(e) { rej(e); }
     });
 }
@@ -2126,9 +2135,17 @@ function playTaddyAd(pubId) {
         try {
             const ads = window.Taddy.ads();
             if (!ads || typeof ads.interstitial !== 'function') return rej("Taddy interstitial missing");
-            ads.interstitial()
-                .then((success) => success ? res() : rej("Taddy ad skipped"))
-                .catch(rej);
+            let shown = false, viewed = false, closed = false, done = false;
+            const finish = (ok, err) => { if (done) return; done = true; clearTimeout(guard); ok ? res() : rej(err); };
+            const check = () => { if (closed && (shown || viewed)) finish(true); };
+            const guard = setTimeout(() => finish(shown || viewed, "Taddy ad timeout"), 120000);
+            ads.interstitial({
+                onViewThrough: () => { viewed = true; check(); },
+                onClosed: () => { closed = true; setTimeout(check, 400); }
+            }).then((success) => {
+                if (success) { shown = true; check(); }
+                else finish(false, "Taddy ad not shown");
+            }).catch((e) => finish(false, e));
         } catch(e) { rej(e); }
     });
 }
